@@ -1,7 +1,9 @@
 ---
 title: "Lepto_iNat_Pops"
-format: html
-editor: visual
+format: markdown_github
+
+execute:
+  warning: false
 ---
 
 ------------------------------------------------------------------------
