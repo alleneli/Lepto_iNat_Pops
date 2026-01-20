@@ -1,0 +1,163 @@
+---
+title: "Lepto_iNat_Pops"
+format: html
+editor: visual
+---
+
+------------------------------------------------------------------------
+
+## Set up Working Directory and Install/Library Packages
+
+```{r}
+install.packages("dbscan")
+install.packages("sf")
+install.packages(("ggspatial"))
+install.packages("rnaturalearthdata")
+library(dbscan)
+library(sf)
+library(dplyr)
+library(ggplot2)
+library(ggspatial)
+library(rnaturalearth)
+```
+
+------------------------------------------------------------------------
+
+## Read in CSV from iNat (*Leptosiphon androsaceus*)
+
+```{r}
+LA <- read.csv("LAndro_iNat.csv")
+names(LA)
+```
+
+------------------------------------------------------------------------
+
+## Convert from Degrees to Meters, set up Pops
+
+```{r}
+#Convert to sf object
+LA_sf <- st_as_sf(LA, coords = c("longitude", "latitude"), crs = 4326)
+
+#Project to meters
+LA_utm <- st_transform(LA_sf, 32611)  # change UTM zone if needed
+coords <- st_coordinates(LA_utm)
+```
+
+------------------------------------------------------------------------
+
+## Run dbscan and add Pops column to CSV
+
+```{r}
+#Run DBSCAN, 500 m radius populations with 5 or more observations per pop
+db <- dbscan(coords, eps = 500, minPts = 5)  
+
+#Add population column
+LA$population_id <- db$cluster
+
+```
+
+------------------------------------------------------------------------
+
+## Check if it worked
+
+```{r}
+table(LA$population_id)
+sum(LA$population_id == 0)
+
+```
+
+------------------------------------------------------------------------
+
+## Save CSV
+
+```{r}
+write.csv(LA, "LAndro_iNat_Pops.csv", row.names = FALSE)
+```
+
+------------------------------------------------------------------------
+
+## Visualize data
+
+### NOTE: All observations beloning to population '0' are singelton observations, that did not meet our population criteria (5 obs within 500 m)
+
+```{r}
+#List pop sizes
+pop_sizes <- LA %>%
+  count(population_id, name = "n_obs") %>%
+  arrange(desc(n_obs))
+
+pop_sizes
+
+#Bar plot of pop sizes
+ggplot(pop_sizes, aes(x = factor(population_id), y = n_obs)) +
+  geom_col() +
+  labs(x = "Population ID",
+       y = "Number of Observations",
+       title = "Observation Counts per Population") +
+  theme_minimal()
+
+```
+
+------------------------------------------------------------------------
+
+## Visualize pops on a map
+
+```{r}
+# Get world basemap
+world <- ne_countries(scale = "medium", returnclass = "sf")
+
+# Bounding box around our data
+bbox <- c(
+  xmin = min(LA$longitude) - 0.5,
+  xmax = max(LA$longitude) + 0.5,
+  ymin = min(LA$latitude) - 0.5,
+  ymax = max(LA$latitude) + 0.5
+)
+
+# Plot
+ggplot() +
+  geom_sf(data = world, fill = "gray95", color = "gray80") +
+  geom_point(data = LA,
+             aes(x = longitude, y = latitude,
+                 color = factor(population_id)),
+             size = 2, alpha = 0.85) +
+  coord_sf(xlim = c(bbox["xmin"], bbox["xmax"]),
+           ylim = c(bbox["ymin"], bbox["ymax"]),
+           expand = FALSE) +
+  labs(color = "Population",
+       title = "LAndro iNaturalist Observations Grouped into Populations") +
+  theme_minimal()
+
+#Oops lets remove noise from 'pop 0' singelton observation
+ggplot() +
+  geom_sf(data = world, fill = "gray95", color = "gray80") +
+  geom_point(data = LA_clean,
+             aes(x = longitude, y = latitude,
+                 color = factor(population_id)),
+             size = 2, alpha = 0.85) +
+  coord_sf(xlim = c(bbox["xmin"], bbox["xmax"]),
+           ylim = c(bbox["ymin"], bbox["ymax"]),
+           expand = FALSE) +
+  labs(color = "Population",
+       title = "LAndro iNaturalist Populations (Noise Removed)") +
+  theme_minimal()
+
+```
+
+------------------------------------------------------------------------
+
+## Lets clean up our data
+
+### Removing all observations that don't fit into a pop
+
+```{r}
+# Remove noise points (population_id == 0)
+LA_clean <- LA %>%
+  filter(population_id != 0)
+
+# Quick check
+table(LA_clean$population_id)
+
+# Save to new CSV
+write.csv(LA_clean, "LAndro_iNat_Pops_filtered.csv", row.names = FALSE)
+```
